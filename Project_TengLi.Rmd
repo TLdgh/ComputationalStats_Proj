@@ -1,0 +1,375 @@
+---
+title: "Computational Statistics Project"
+author: "Teng Li"
+date: "2023-04-12"
+output:
+  html_document:
+    df_print: paged
+bibliography: References.bib
+link-citations: true
+---
+
+```{r setup, include=FALSE}
+library("tidyverse")
+library("plotly")
+set.seed(100)
+```
+
+## Introduction
+We are interested in studying an improved version of the EM algorithm, namely Smoothed-EM algorithm, with additional change made for studying the back-projection of AIDS incidence data. We will be focusing on the following two articles:
+
+
+An Improved EMS Algorithm for Back-projection of AIDS Incidence Data
+
+Ian C. Marschner & Lyndsey F. Watson (1994) 
+
+and
+
+A METHOD OF NON-PARAMETRIC BACK-PROJECTION AND ITS APPLICATION TO AIDS DATA
+
+NIELS G. BECKER, LYNDSEY F. WATSON, AND JOHN B. CARLIN
+
+The HIV infection results in a progressive stage called AIDS condition, at which point there is little treatment can be done to repair the damage to the immune system. However we can't observe the number of HIV incidence in reality; we can only observe the incubation period between HIV infection and AIDS condition. Thus the AIDS incidence data can be used to back estimate the number of HIV incidence and predict HIV epidemic in the future. The procedure using the AIDS data to estimate HIV incidence is called back-projection. We will first introduce the epidemic model, present the modified EMS algorithm proposed by the authors, and explain how we can implement the algorithm to estimate the number of HIV incidence. 
+
+## HIV/AIDS Epidemic Model
+1. Let $Y_t$ be the number of AIDS incidence at time $t=\{1,2,...,T\}$ such that $Y_t \sim Poisson(\mu_t)$.
+2. $N_t$ be the unobservable number of HIV infections at time $t=\{1...T\}$ such that $N_t\sim Poisson(\lambda_t)$.
+3. T is the latest time at which we observe AIDS incidence.
+4. The convolution equation between the parameters is $\mu_t = \sum_{i=1}^t \lambda_i f_{t-i}$, where $f_{t-i}$ is the distribution of incubation period of length $d=t-i$ with HIV infection at t, usually known and assume to be Weibull distribution. The goal is to use the observations $Y_t$ and an assumed form for $f_d, d=(0,...,T-1)$ to estimate $\lambda_i$, which is called the method of back-projection.
+
+Given the data of $Y_t$, we have the following likelihood:
+\begin{gather*}
+L(\lambda;\vec{y})=\prod_{t=1}^T e^{-\sum_{i=1}^t \lambda_i f_{t-i}}\cdot \frac{(\sum_{i=1}^t \lambda_i f_{t-i})^{y_t}}{y_t!}\\
+\frac{\partial L}{\partial \lambda}=l(\lambda;\vec{y})=\sum_{t=1}^T [-\sum_{i=1}^t \lambda_i f_{t-i}+y_t \ln(\sum_{i=1}^t \lambda_i f_{t-i})-\ln(y_t!)]\\
+=\sum_{t=1}^T [y_t\ln{\mu_t}-\mu_t-\ln{y_t!}]
+\end{gather*}
+
+In the ordinary EM algorithm, we are seeking a complete set of data such that its likelihood can be maximized at each iteration. In the early research [@Original] the complete data $N_{td}(t=1...T; d=0...T-t)$ was chosen by the researchers, where $N_{td}$ is the number of individuals with HIV infection at time t and an incubation period d. One can see that $Y_t=\sum_{d=0}^{t-1}N_{t-d,d}=N_{t,0}+N_{t-1,1}+...+N_{1,t-1}$. Therefore in reality we only observe the data $Y_t$. We have the following:
+$$
+E[N_{td}|y_1,...,y_T]=y_{t+d} \cdot \frac{\lambda_tf_d}{\mu_t}
+$$
+Thus given the observations, we have the likelihood function:
+\begin{gather*}
+L(\lambda_t;N_{td})=\prod_{t=1}^T \prod_{d=0}^{t-1} e^{-\lambda_t f_d}\cdot \frac{(\lambda_t f_d)^n_{td}}{n_{td}!}\\
+l(\lambda_t;N_{td})=\sum_{t=1}^T\sum_{d=0}^{t-1} [n_{td}\ln(\lambda_t f_d)-\lambda_t f_d]-\sum_{t=1}^T \ln(n_{td}!)\\
+\end{gather*}
+Therefore we can obtain the expectation of the loglikelihood for the E-step:
+$$
+Q(\lambda_t|\lambda_t^{old})=E[l(\lambda_t;N_{td})|\vec{y};\lambda_t^{old}]
+$$
+The M-step aims to maximize this function, i.e. 
+$$
+\lambda_t^{new}=argmax_{\lambda} Q(\lambda_t|\lambda_t^{old})=argmax_{\lambda} \Bigl\{ \sum_{t=1}^T \sum_{d=0}^{t-1} [y_t \cdot \frac{\lambda_t f_d}{\mu_t}\cdot \ln(\lambda_t f_d)-\lambda_t f_d] \Bigl\}
+$$ 
+Thus we have
+$$
+\lambda_t^{new}=\frac{1}{F_{T-t}} \cdot \sum_{d=0}^{T-t} y_{t+d}\cdot \frac{\lambda_t^{old}f_d}{\sum_{i=1}^{t+d} \lambda_i^{old}f_{t+d-i}}
+$$
+where $F_{T-t}:=\sum_{d=0}^{T-t}f_d$ is the cumulative function of the incubation period. [@Original]
+
+## EMS Algorithm
+When researchers try to estimate parameters of the epidemic model, the EM algorithm produces big tail fluctuation in the estimates. These extreme values show unstability of the algorithm and thus it needs to be improved. The additional smoothing step is introduced in the paper where the MLE is modified such that it no longer maximizes the original log-likelihood function but maximizes a pernalized version of the log-likelihood. 
+The new M-step was given as:
+$$
+\lambda_t^{new}=\sum_{i=0}^k w_i\cdot \phi_{t+i-k/2}, \quad where~ \phi_t=\frac{1}{F_{T-t}} \cdot \sum_{d=0}^{T-t} y_{t+d}\cdot \frac{\lambda_t^{old}f_d}{\sum_{i=1}^{t+d} \lambda_i^{old}f_{t+d-i}},\quad w_i=\frac{\binom{k}{i}}{2^k},i=0,1...k
+$$
+$w_i$ are the weights such that $\sum_{i=0}^k w_i=1$ and k is called the "window width".  [@Original]
+
+## Modification of EMS
+The author made an additional modification to get a better estimate of $\lambda_t$, which is using the total set of HIV infections $\{N_t;t=1...T \}$ (the part that leads to AIDS and the other that doesn't) as the complete data in the EMS algorithm; i.e. we assume the entire HIV epidemic is observable.
+
+The new estimator is then calculated as the following [@Main]:
+$$
+\phi_t=E(N_t|\vec{y};\lambda_t^{old})=\sum_{d=0}^{T-t} \frac{y_{t+d} \lambda_t^{old} f_d}{\sum_{i=1}^{t+d} \lambda_i^{old}f_{t+d-i}} + \lambda_t^{old}(1-F_{T-t})
+$$
+and the smoothing step is applied as usual:
+$$
+\lambda_t^{new}=\sum_{i=0}^k w_i\cdot \phi_{t+i-k/2}
+$$
+
+We will use both the simulated data and data from reference according to the epidemic model of HIV incidence to demonstrate the result.
+
+## Implementation of Algorithms
+
+### Part 1: Contruct our algorithms:
+We present the following codes of the three algorithms: EM, EMS (with smoothing) and EMS_Mod (with smoothing and alternative complete data). Consider a very unrealistic model where the true mean of the HIV incidence $\lambda_t$ are constants equal to 100. We then simulate the corresponding AIDS incidence and use it for estimation.
+
+```{r}  
+fd<-function(d){(1-exp(-0.0021*((d+1)/12)^2.516)) - (1-exp(-0.0021*(d/12)^2.516))}
+Fd<-function(T,t){sum(sapply(0:(T-t), fd))}
+mu_td<-function(lambda, t,d){lambda[1:(t+d)] %*% sapply(1:(t+d), function(i) fd(t+d-i))}
+
+
+#Simulated y and lambda
+T<-150
+t<-1:T
+True_lambda<-rep(100,T)
+mus<-sapply(t, function(i) mu_td(lambda = True_lambda, t=i, d=0))
+SimY<-rpois(T, lambda = mus)
+
+lambda_old=runif(150, 99, 101)
+```
+
+```{r}
+#create lambda_new the MLE using the conventional EM algorithm
+EM_Step<-function(y, T, t, lambda_old){
+  tot=sapply(0:(T-t), function(d){y[t+d] * fd(d) / mu_td(lambda_old,t,d)})%>%sum()
+  lambda_new_t=lambda_old[t]*tot/Fd(T,t)
+  return(lambda_new_t)
+}
+
+EM<-function(y, T, t, lambda_old, n_iter=5000){
+  for(i in 1:n_iter){
+    lambda_new<-sapply(t, function(i) EM_Step(y, T, t=i, lambda_old = lambda_old))
+    Criterion=sum((lambda_new-lambda_old)^2) <= 1e-7 * sum((lambda_old)^2)
+    
+    if(i%%50==0){cat("Running EM. The current criterion for iteration ", i , " is: ",
+                     sum((lambda_new-lambda_old)^2) / sum((lambda_old)^2),
+                     "\n")}
+    
+    if(Criterion){
+      break    
+    }else{lambda_old<-lambda_new}
+  }
+  return(lambda_new)
+}
+
+
+# Adding the weight w to create the smoothing version EMS
+EMS<-function(y, T, t, k=2, lambda_old, n_iter=5000){
+  for(i in 1:n_iter){
+    lambda_new<-sapply(t, function(i) EM_Step(y, T, t=i, lambda_old = lambda_old))
+    
+    w<-sapply(0:k, function(x) choose(k,x)/(2^k))
+    lambda_new<-sapply((1+k/2):(length(y)-k/2), 
+                       function(t){w%*%lambda_new[(t-k/2):(t+k/2)]})
+    lambda_new<-c(rep(first(lambda_new),k/2), lambda_new, rep(last(lambda_new),k/2))
+    
+    Criterion=sum((lambda_new-lambda_old)^2) <= 1e-7 * sum((lambda_old)^2)
+    
+    if(i%%50==0){cat("Running EMS. The current criterion for iteration ", i , " is: ",
+                     sum((lambda_new-lambda_old)^2) / sum((lambda_old)^2),
+                     "\n")}
+    
+    if(Criterion){
+      break    
+    }else{lambda_old<-lambda_new}
+  }
+  return(lambda_new)
+}
+
+# Modified EMS step, using a different complete data, hence different lambda_new formula
+EM_Step_mod<-function(y, T, t, lambda_old){
+  tot=sapply(0:(T-t), function(d){y[t+d] * fd(d) / mu_td(lambda_old,t,d)})%>%sum()
+  lambda_new_t=lambda_old[t]*tot+lambda_old[t]*(1-Fd(T,t))
+  return(lambda_new_t)
+}
+
+EMS_mod<-function(y, T, t, k=2, lambda_old, n_iter=5000){
+  for(i in 1:n_iter){
+    lambda_new<-sapply(t, function(i) EM_Step_mod(y, T, t=i, lambda_old = lambda_old))
+    
+    w<-sapply(0:k, function(x) choose(k,x)/(2^k))
+    lambda_new<-sapply((1+k/2):(length(y)-k/2), 
+                       function(t){w%*%lambda_new[(t-k/2):(t+k/2)]})
+    lambda_new<-c(rep(first(lambda_new),k/2), lambda_new, rep(last(lambda_new),k/2))
+    
+    Criterion=sum((lambda_new-lambda_old)^2) <= 1e-7 * sum((lambda_old)^2)
+    
+    if(i%%50==0){cat("Running Modified EMS. The current criterion for iteration ", i , " is: ",
+                     sum((lambda_new-lambda_old)^2) / sum((lambda_old)^2),
+                     "\n")}
+    
+    if(Criterion){
+      break    
+    }else{lambda_old<-lambda_new}
+  }
+  return(lambda_new)
+}
+```
+
+### Part 2: Implementation to Simulated Data:
+We first demonstrate what the estimates look like under these three algorithms to gain an intuitive understanding why the ordinary EM algorithm needs to be improved. Throughout the report, we assume that the distribution of the incubation period is known as:
+$$
+F(d)=1-exp \left[-0.0021\cdot \left(d \right)^{2.516} \right]
+$$
+i.e. this is the probability that an HIV infected individual progresses to AID within d months after infection.
+
+Now we apply the EM and EMS algorithms to the simulated AIDS incidence:
+```{r}
+Sim_est1<-EM(y=SimY, T=T, t=t, lambda_old=lambda_old)
+Sim_est2<-EMS(y=SimY, T=T, t=t, lambda_old=lambda_old, k=4)
+Sim_est3<-EMS_mod(y=SimY, T=T, t=t, k=4, lambda_old=lambda_old, n_iter = 2500)
+```
+
+```{r,fig.width=9.5,fig.height=5}
+tibble(Date=t,EM_est=Sim_est1,EMS_est=Sim_est2,EMSMod_est=Sim_est3,True_lambda=True_lambda)%>%
+  pivot_longer(names_to = "Simulation", values_to = "Estimates", 2:5)%>%
+  plot_ly(x=~Date, y=~Estimates, color = ~Simulation, type = "scatter", mode="lines")
+```
+
+From the above plot we immediately see that the ordinary EM algorithm yields very imprecise estimation of the means. One can also observe the tail fluctuation in the plot, though in general the estimation of the HIV infection incidence towards the recent past are very volatile, because the incubation period of AIDS can be very long and thus provide very inaccurate estimation of recent infections. On the other hand, the EMS algorithm gives better estimation, and the modified EMS gives the best result.
+
+### Part 3: Comparison of EMS Simulations
+From the previous naive simulation we see that the addition of a weighted factor in the EM algorithm leads to a smoother curve, and more stable estimates of the HIV incidence rate ($\lambda_t$). The weighting factor has the following form and properties: $w_i=\frac{\binom{k}{i}}{2^k},i=0,1,...,k$, though it can be specified by the tester as long as it has symmetric values and summation of 1. Using the weighted moving average provides less variance between adjacent estimates. However, as we use more weights we loose more points on both ends of the time series. An intuitive approach to avoid this issue is that instead of estimating from t=1, we estimate the $\hat{\lambda}_t$ from $t=1+\frac{k}{2}$ to $t=T-\frac{k}{2}$. Then the missing points on both ends can be created by using the values $\hat{\lambda}_{1+\frac{k}{2}}$ and $\hat{\lambda}_{T-\frac{k}{2}}$ respectively. As k becomes large, we have more points missing, hence this approach essentially creates a horizontal line on both ends of the estimated curve. One can use other methods from numerical analysis such as polynomial or spline interpolation, however since the recent estimation tends to be unreliable we can ignore the error caused by interpolation techniques. Moreover one doesn't necessarily need a large number of weights. We simulate with different values of k:
+```{r}
+# EMS k = 2
+estimates22<-EMS(y=SimY, T=T, t=t, lambda_old=lambda_old, k=2)
+
+# EMS k = 4
+estimates24<-Sim_est2
+
+# EMS k = 6
+estimates26<-EMS(y=SimY, T=T, t=t, lambda_old=lambda_old, k=6)
+
+# EMS k = 8
+estimates28<-EMS(y=SimY, T=T, t=t, lambda_old=lambda_old, k=8)
+
+# EMS k = 10
+estimates210<-EMS(y=SimY, T=T, t=t, lambda_old=lambda_old, k=10)
+```
+
+```{r,fig.width=9.5,fig.height=5}
+Estimates_Keenan_long<-tibble(Date=t,estimates22,estimates24,estimates26,estimates28,estimates210,True_lambda=True_lambda)%>%
+  pivot_longer(names_to = "Simulation", values_to = "Estimates", -Date)
+
+Estimates_Keenan_long%>%
+  plot_ly(x=~Date, y=~Estimates, color = ~Simulation, type = "scatter", mode="lines")
+```
+
+Shown are estimates using the EMS algorithm with varying values of the $k$ parameter ($k = 2, 4, 6, 8, 10$) in the weighting factor. We can see that as the value of $k$ increases, the estimates tend to decrease (for reference, estimates22 curve is the curve with $k = 2$). The degree of smoothing increases when $k$ increases, as there are more observations with less weight being used for the estimation. This, in turn, leads to bias being reduced as $k$ increases. We will see that this is the case in the next plot:  
+```{r,fig.width=9.5,fig.height=5}
+## Bias for Each Curve
+bias <- Estimates_Keenan_long %>%
+  group_by(Simulation) %>%
+  summarize(bias = mean(Estimates-True_lambda))
+
+ggplot(bias, aes(x = Simulation, y = bias)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Bias for Each Curve", x = "Curve", y = "Bias")
+```
+
+Here, we can see that all of our estimates from the EMS algorithm (regardless of the value of $k$) are biased. The large bias comes from the fact that the tail estimates are much less accurate, but it is reduced as the value of $k$ increases. The bias corresponding to the curve where $k = 10$ is clearly the least biased, or the closest to the true values. Looking strictly at this, one may argue that we should continue to increase the value of $k$ in order to minimize the bias associated with our estimates. While this may be an appealing way to look at the situation, this may not be the best course of action. First of all, it is generally not true that adding more weights leads to bias reduction. We will see this in the next section: Implementation to Real Data. Secondly, similar to over-parametrization in linear regression models, as we add more parameters the fit explains the unnecessary sampling noise instead of the underlying true nature of data. The same logic may apply when adding more weights in our smoothing step. Our goal is to estimate the HIV incidence curve so that one can make future prediction. If over-smoothing the estimates, it can lead to missing true underlying trends in the data. Alternatively, if the level of smoothing is too weak, the estimates may become overly sensitive to noise in the data, which can result in a higher variance and higher bias, defeating the purpose of smoothing. Thus, there is always a suitable level of smoothing to apply. We have chosen in our case $k=4$. In general, the more weights we use, the more end points on both sides of the curve become constant (flat), which is less realistic either in model explanation and prediction.
+
+One way of having less number of weights while still obtaining accurate estimates is to consider a different set of complete data, as we have seen before in the case of EMS_Mod algorithm.
+
+### Part 4: Comparison of Modified EMS Simulations
+To further improve on the EMS algorithm, we can consider the entire HIV positive population as observable, rather than just those diagnosed with AIDS by time T. This offers a more complete data set than was used previously. This change has no effect as T tends to infinity, but produces observable improvement in estimation when analyzing realistic epidemic data.
+
+Let's simulate a more realistic true HIV incidence curve. We simply tried a few functions and modifications to get the following plot:
+```{r,fig.width=9.5,fig.height=5}
+True_lambda2<-(14500*dnorm(10:139,mean=60,sd=15)+1)
+temp<-1:70
+temp<-(temp-1)^2/exp(0.05*temp)+1
+True_lambda2<-(True_lambda2+c(rep(0,60),temp))%>%round() 
+tibble(T=1:130,True_lambda2)%>%plot_ly(x=~T, y=~True_lambda2,type = "scatter",mode="lines")%>%
+  layout(title="True HIV Incidence Curve")
+```
+
+We now use this simulation to create the AIDS incidence for testing the algorithms:
+```{r}
+T<-130
+t<-1:T
+mus<-sapply(t, function(i) mu_td(lambda = True_lambda2, t=i, d=0))
+SimY2<-rpois(T, lambda = mus)
+```
+
+Applying the three algorithms:
+```{r}
+lambda_old=runif(T, 67, 295) # mean of SimY2 +/- 1 standard deviation
+Sim_est1<-EM(y=SimY2, T=T, t=t, lambda_old=lambda_old)
+Sim_est2<-EMS(y=SimY2, T=T, t=t, lambda_old=lambda_old, k=4)
+Sim_est3<-EMS_mod(y=SimY2, T=T, t=t, lambda_old=lambda_old, k=4, n_iter = 2500)
+```
+
+```{r,fig.width=9.5,fig.height=5}
+tibble(Date=t,EM_est=Sim_est1,EMS_est=Sim_est2,EMSMod_est=Sim_est3,True_lambda=True_lambda2)%>%
+  pivot_longer(names_to = "Simulation", values_to = "Estimates", 2:5)%>%
+  plot_ly(x=~Date, y=~Estimates, color = ~Simulation, type = "scatter", mode="lines")
+```
+
+The first thing to notice that when we consider this more realistic model, we are specifying the weights in the Modified EMS algorithm, i.e. $w=c(0.08,0.84,0.08)$. The reason why we do this is that in order to compare the performance of EMS vs. Modified EMS algorithms, one must calibrate the estimates to the same smoothing level. As explained in the article by Marschner and Watson [@Main], the convenient way to calibrate is by standardizing the peak HIV incidence estimate. One can achieve this by adjusting the weights used in the Modified EMS algorithm.
+
+From the above plot we can see that EMS and Modified EMS perform similarly before the peak, but as it gets closer to recent time, Modified EMS gives closer estimates to the true curve. 
+
+As we have explain before the EM and EMS algorithms are prone to high instability in the latter stages of an epidemic, and this odd tail behaviour arises due to the numerator in the M step approaching zero, as the expected number of individuals with zero incubation period is very small. The denominator will be approximately zero as well, creating extreme values which carries into future iterations through the smoothing algorithm. In the modified algorithm however, the M step is an addition rather than division by a small number, which is inherently more stable.
+
+In terms of tail flexibility, the modified algorithm performs better as well. When analyzing emerging data during the early and mid stages of an epidemic, the model will be calibrated as new information arises. The unmodified EMS algorithm generates more extreme and implausible tail data when the calibration is varied than the modified algorithm does.
+
+The benefits of Modified EMS are not free from drawbacks. The modified algorithm requires more weights to be smoothed than EMS, which causes an increased bias, but the amount of increase is generally acceptable. Another fault of the algorithm is that it requires more iterations to converge, on average 10 to 15 times as many as the EMS [@Main]. One can see from the above code that we had to increase the number of iterations to 5000 in order to reach convergence criterion, compared to 2500 we used in EMS. However, this fault is only slightly significant for a researcher with reasonable computing power. In addition, if we take a look at the closed form of Modified EMS M-step:
+$$
+\phi_t=E(N_t|\vec{y};\lambda_t^{old})=\sum_{d=0}^{T-t} \frac{y_{t+d} \lambda_t^{old} f_d}{\sum_{i=1}^{t+d} \lambda_i^{old}f_{t+d-i}} + \lambda_t^{old}(1-F_{T-t})
+$$
+one can see that as T goes to infinity, the distribution $F_{T-t}\rightarrow 1$, thus the M-step in Modified EMS becomes equivalent to EMS. Nowadays it is very possible to make T goes to infinity, because the patient's life expectancy has been improved a lot under proper treatment. According to CDC, if the patient takes medication properly to maintain viral suppression, in which case the viral load in the blood becomes undetectable, then the patient can stay healthy and will not transmit HIV to partners [@CDC]. Therefore one can assume in this case that T, the time at which we observe AIDS incidence, is infinite.
+
+Overall, looking at the pros and cons of the modified algorithm, it offers a clear and substantial improvement over the original EMS in regards to stability and flexibility.
+
+## Implementation to Real Data:
+We will use the Australia AIDS incidence data, provided in the article by Becker and Watson [@Original]. 
+```{r}
+AIDS<-data.frame(Date=seq.Date(as.Date("1979-01-01"), length.out = 130, by="month"),Index=1:130,
+                 Incidence=c(rep(0,47),1,0,0,0,1,0,0,0,1,1,0,1,2,0,0,1,2,0,2,3,6,7,6,5,11,11,11,6,
+                             9,19,8,9,4,11,10,9,11,15,14,13,14,18,18,16,23,22,30,25,13,30,25,31,17,
+                             46,34,24,27,37,29,44,26,39,42,27,28,34,41,49,45,41,53,58,40,53,47,32,25,
+                             39,42,38,48,48,50))
+```
+
+We again apply the algorithms to estimate the mean parameter of the HIV incidence:
+```{r,echo=FALSE}
+T<-nrow(AIDS)
+t<-1:T
+lambda_old<-runif(T, min = 0, max = 60)
+
+estimates1<-EM(y=AIDS$Incidence, T=T, t=t, lambda_old=lambda_old)
+estimates2<-EMS(y=AIDS$Incidence, T=T, t=t, lambda_old=lambda_old, k=4)
+estimates3<-EMS_mod(y=AIDS$Incidence, T=T, t=t, lambda_old=lambda_old, k=4, n_iter = 2500)
+```
+
+```{r,echo=FALSE,fig.width=9.5,fig.height=5}
+tibble(Date=AIDS$Date, 
+       EM_est=estimates1,
+       EMS_est=estimates2,
+       EMSMod_est=estimates3)%>%
+  pivot_longer(names_to = "Simulation", values_to = "Estimates", 2:4)%>%
+  plot_ly(x=~Date, y=~Estimates, color = ~Simulation, type = "scatter", mode="lines")%>%
+  layout(title = "Comparison of Estimates by EM, EMS, and EMS_Mod")
+```
+
+From the first look of all three algorithms, we can see that the EMS and Modified EMS algorithms give more realistic estimation of the incidence curve. Although we don't have the true curve to compare with, it is not difficult to draw such conclusion by simply observing the above plot. Moreover the Modified EMS algorithm gives even more realistic estimation because now the tail on the right hand side gradually decreases to some non-zero value. 
+
+We now explain why one can't increase the number of smoothing weights and hope to decrease the bias. We will estimate 10 curves using the EMS algorithm for each value of k. Note that because we don't have the true HIV incidence curve, we will just use the curve given by the Modified EMS algorithm as a "true" curve. The same logic will nevertheless apply. Since $\hat{\lambda}_t,t=1...T$ is a vector, we will take the Euclidean norm of the bias vector as the total bias, i.e. $Bias(\vec{\theta}):=||\hat{\theta} - \vec{\theta}||_2$.  
+```{r}
+ks<-c(seq(2,10,2),seq(14,50,4)) #choose different k values as the number of weights
+bias<-sapply(ks,function(k){
+  est<-do.call(cbind,lapply(1:5, function(i){
+    lambda_old<-(14500*dnorm(10:139,mean=(60+runif(1,-1,1)),sd=(15+runif(1,-1,1)) ))%>%round()
+    res<-EMS(y=AIDS$Incidence, T=T, t=t, lambda_old=lambda_old, k=k, n_iter = 2500) #estimated curve using EMS
+    return(res)
+  }))
+  bias<-rowMeans(est)-estimates3 #bias of each lambda_t
+  return(sqrt(t(bias)%*%bias)) #norm of bias vector
+})
+```
+
+We plot the bias:
+```{r,fig.width=9.5,fig.height=5}
+data.frame(k=ks,Bias=bias)%>%plot_ly(x=~k, y=~Bias, type = "scatter",mode="lines")%>%
+  layout(title = "Bias vs. k")
+```
+
+We clearly see that the bias at some point will increase if we increase the number of weights in the smoothing step. This is because that the smoothing is a weighted moving average. The more weights we use, the more past points we are using to estimate the current point, hence the estimated curve because flatter (smoother). Therefore when our true curve is a constant flat line like in Part 3, the bias will decrease as $k\rightarrow \infty$. However if the true curve is actually a curve, then flattening the estimated curve will consequently produce a curve that's very different from the true curve, hence greater bias. In general it is then possible to choose an optimal smoothing parameter k if one has some knowledge in advance of what the true curve can be. Such initial estimation could for example come from a parametric estimation, or a good guess of what k giving an appealing visual result. 
+
+## Conclusion
+Practically speaking, when studying HIV/AIDS incidence in real life, we would only have one set of data concerning incidence rates etc. The smoothing step helps researchers combat the issues arising from the fact that the nonparametric maximum likelihood estimates are quite unstable. This much was clear to Becker and Watson “In practice one has just one realization of AIDS incidence data and it is clear that the unstable nature of the nonparametric maximum likelihood estimates must be overcome by some form of smoothing.” [@Original]. When dealing with computational methods applied to statistical problems, it is clear we want to be as practical as possible. The smoothing step applied in the EMS algorithm allows for a more practical and realistic estimation process from the data that is available. 
+
+The other clear benefit to the smoothing step is the time to convergence in the algorithm itself. Above, we mentioned how the smoothing step reduces the variance between estimates of HIV incidence rates. Clearly, this reduction in variance only helps to reduce the time it takes for the algorithm to converge, which is of great relevance to anyone wishing to study the subject and use the algorithm. Tail stability is another issue with the algorithm that is helped by the smoothing step. We can see from the previous smoothed curve that the right tail of the curve is more stable than the original EM result.
+
+While these benefits from the smoothing step in the EMS algorithm are of consequence, the one drawback is this: the peak estimates of the mid-1980s data are understated in the smoothed version. This may lead statisticians or researchers to draw different inferences from the data. This, however, is a small difference and as can be seen from the previous plots, does not drastically change the shape of the curve. 
+
+The problem of back-projection of AIDS incidence is no small feat, however it should be clear that the addition of the smoothing step, changing the EM algorithm into an EMS algorithm, helps us greatly in terms of algorithm convergence and practicality. Once again, we reiterate that when applying computational methods to statistical problems, it is always best to try to be as efficient and practical as possible. The addition of the smoothing step in the EMS algorithm does a good job of addressing both of these, while leaving the estimates relatively intact and unchanged.
+
+While the EMS has shown promising improvement, the Modified EMS takes it to another level by reconsider a different set of complete data. In complete generality, it might not be possible to have an alternative complete data. Even if it exists it might not necessarily provide better estimation. Though when it does exist, it is certainly worth considering and comparing it with EM or EMS algorithms. Like in our case, Modified EMS not only improves the tail fluctuation issue, but it also has equivalency as EMS as T reaches infinity. Such property helps us guarding against unexpected errors when implementing different algorithms to real-world data. 
+
+## References{.allowframebreaks}
+
+
